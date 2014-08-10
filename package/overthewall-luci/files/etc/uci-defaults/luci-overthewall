@@ -1,0 +1,17 @@
+#!/bin/sh
+#firewall.overthewall will slowdown the internet speed
+# delete firewall.overthewall
+# set firewall.overthewall=include
+# set firewall.overthewall.type=script
+# set firewall.overthewall.path=/etc/firewall.overthewall
+# set firewall.overthewall.reload=1
+# commit firewall
+uci -q batch <<-EOF >/dev/null
+	delete ucitrack.@overthewall[-1]
+	add ucitrack overthewall
+	set ucitrack.@overthewall[-1].init=overthewall
+	commit ucitrack
+EOF
+
+rm -f /tmp/luci-indexcache
+exit 0

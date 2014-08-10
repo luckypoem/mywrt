@@ -1,0 +1,180 @@
+#!/bin/sh
+echo "Content-type: text/html"
+echo ""
+
+SHADOWSOCKS_PATH='/etc/shadowsocks/'
+[[ -d $SHADOWSOCKS_PATH ]] || mkdir $SHADOWSOCKS_PATH
+SHADOWSOCKS_CONF='/etc/config/shadowsocks'
+SHADOWSOCKS_TMP='/tmp/shadowsocks.server.tmp'
+TITLE='ShadowSocks'
+APP='Shadowsocks'
+LOCATION='1'
+WIDTH='600px'
+MSG=""
+ERR=""
+
+### set var: $DATA_name
+if [ "$REQUEST_METHOD" = "POST" ] ; then
+	read QUERY_STRING
+fi
+eval $(echo $QUERY_STRING | awk -F'[=&]' '{for(i=1;i<=NF;i++){if(i%2==0){print "DATA_"$(i-1)"="$i}}}')
+
+### Remove
+[ "$DATA_action" = "remove" ] && [ "$DATA_file" ] && {
+	rm -f "$SHADOWSOCKS_PATH$DATA_file"
+	MSG="Removed $DATA_file. "
+}
+### Edit
+[ "$DATA_action" = "edit" ] && [ "$DATA_file" ] && {
+	eval $(cat $SHADOWSOCKS_PATH$DATA_file | awk -F'|' '{print "server_ip="$1,"server_port="$2,"server_password="$3,"server_method="$4}')
+	post_action='Save'
+}
+### Apply
+is_process="`ps | grep -E 'ss-(local|redir)'`"
+[ "$DATA_action" = "apply" ] && [ "$DATA_file" ] && {
+	eval $(cat $SHADOWSOCKS_PATH$DATA_file | awk -F'|' '{print "server_ip="$1,"server_port="$2,"server_password="$3,"server_method="$4}')
+	rm -f $SHADOWSOCKS_TMP
+	IFS="\t"
+	while read line; do
+		IFS=""
+		echo $line | sed -e "s/remote_server.*/remote_server '$server_ip'/; s/remote_port.*/remote_port '$server_port'/; s/password.*/password '$server_password'/; s/cipher.*/cipher '$server_method'/" >>$SHADOWSOCKS_TMP
+		#echo "$line" >>$SHADOWSOCKS_TMP
+	done < $SHADOWSOCKS_CONF
+	IFS=""
+	rm -f $SHADOWSOCKS_CONF
+	cp $SHADOWSOCKS_TMP $SHADOWSOCKS_CONF
+	rm -f $SHADOWSOCKS_TMP
+	MSG="ShadowSocks server changed to $server_ip. "
+	unset server_ip server_port server_password server_method
+	[ ${#is_process} != 0 ] && {
+		/etc/init.d/shadowsocks restart
+		MSG=$MSG"Restarted Service. "
+	}
+}
+### Add
+[ "$DATA_post_action" ] && {
+	[ "$DATA_server_ip" ] || ERR=$ERR"Server ip is required. "
+	[ "$DATA_server_ip" ] && server_ip_true="`echo $DATA_server_ip | grep -E "([0-9]{1,3}[\.]){3}[0-9]{1,3}"`"
+	[ "$DATA_server_ip" ] && server_domain_true="`echo $DATA_server_ip | grep -E "([0-9A-Za-z-]+[\.])+[A-Za-z]{2,4}"`"
+	[ "$DATA_server_ip" ] && {
+		[ "${#server_ip_true}" != 0 ] || [ "${#server_domain_true}" != 0 ] || ERR=$ERR"Invalid server ip or domain. "
+	}
+	[ "$DATA_server_port" ] || ERR=$ERR"Server port is required. "
+	[ "$DATA_server_port" ] && {
+		[ "$DATA_server_port" -gt 0 ] && [ "$DATA_server_port" -lt 65535 ]|| ERR=$ERR"Invalid port (0~65535). "
+	}
+	[ "$DATA_server_password" ] || ERR=$ERR"Server password is required. "
+	[ "$DATA_server_method" ] || ERR=$ERR"Server method is required. "
+	[ "$LOCATION" = "1" ] && [ "$DATA_server_ip" ] && {
+		DATA_location=`curl -A 'Mozilla' -s 'http://www.ip.cn/index.php?ip='$DATA_server_ip | grep -o "GeoIP[^<]\+"`
+		DATA_location=${DATA_location##*: }
+		echo 
+	}
+	[ "$ERR" ] || {
+		echo "$DATA_server_ip|$DATA_server_port|$DATA_server_password|$DATA_server_method|$DATA_location" >"$SHADOWSOCKS_PATH$DATA_server_ip"
+		MSG=$MSG"Added server "$DATA_server_ip". "
+	}
+}
+### init
+${server_method:='aes-256-cfb'}
+${post_action:='Add'}
+
+echo "<!DOCTYPE html>"
+echo "<html><head>"
+echo "<meta charset="utf-8">"
+echo "<title>$TITLE</title>"
+### CSS START ###
+echo "<style>"
+echo "body{color:#404040;font-family:Arial, sans-serif;font-size:13px;margin:0;}"
+echo "input,textarea,select,.uneditable-input{display:inline-block;width:100%;height:28px;padding:0;font-size:13px;font-family:Arial,Tahoma;line-height:28px;color:#808080;border:1px solid #ccc;-webkit-border-radius:3px;-moz-border-radius:3px;border-radius:3px;text-indent:5px;box-sizing:border-box;}"
+echo "select{padding:3px 3px 3px 5px;}"
+echo "ul{list-style-type:none;padding:0;margin:0;width:100%;margin-top:20px;}"
+echo "li{border-bottom:1px solid #cccccc;padding:9px 0 32px 0;}"
+echo "li span{display:inline-block;float:left;padding:4px;}"
+echo "li a, li a:after{display:inline-block;float:right;margin-left:5px;width:50px;text-align:center;text-decoration:none;font-size:12px;color:#666666;border:1px solid #ccc;padding:4px;-webkit-border-radius:3px;-moz-border-radius:3px;border-radius:3px;}"
+echo "li a:hover{border-color:#0069d6;}"
+echo "li .location{color:#aaaaaa;margin-left:5px;}"
+echo ".server_now{color:#ffffff;background-color:#0069d6;font-size:10px;padding:2px 5px;line-height:10px;margin-top:5px;margin-left:5px;-webkit-border-radius:3px;-moz-border-radius:3px;border-radius:3px;}"
+echo ".blue{color:#0069d6;}"
+echo "h1{font-size:24px;padding:0;margin:0 0 10px 0;font-weight:700;color:#0069d6;}"
+echo "table{width:100%;font-size:13px;}"
+echo "table td{padding:7px 0;}"
+echo ".menu{background-color: #2d2d2d; color:#ffffff; height:40px;line-height: 40px; position: fixed; top:0;width: 100%;margin:0;padding:0;text-align:center; background: #2d2d2d; background: -moz-linear-gradient(top,  #333333 1%, #2a2a2a 49%, #232323 100%); background: -webkit-gradient(linear, left top, left bottom, color-stop(1%,#333333), color-stop(49%,#2a2a2a), color-stop(100%,#232323)); background: -webkit-linear-gradient(top,  #333333 1%,#2a2a2a 49%,#232323 100%); background: -o-linear-gradient(top,  #333333 1%,#2a2a2a 49%,#232323 100%); background: -ms-linear-gradient(top,  #333333 1%,#2a2a2a 49%,#232323 100%); background: linear-gradient(top,  #333333 1%,#2a2a2a 49%,#232323 100%); filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#333333', endColorstr='#232323',GradientType=0 );box-shadow: 0px 2px 5px #cccccc;}"
+echo ".menu .title1{font-size:22px;display:block;width:$WIDTH;margin:0 auto;padding:0 20px;line-height:40px;text-align:left;}"
+echo ".main{width:$WIDTH;margin:0 auto;padding:80px 20px 20px 20px;}"
+echo ".submit{background-color:#0069d6;border-color:#0057b2;color:#ffffff;text-indent:0px;}"
+echo ".td_l{width:25%;}"
+echo ".msg{color:#47a800;background-color:#f2ffe9;border:1px solid #84c852;-webkit-border-radius:3px;-moz-border-radius:3px;border-radius:3px;padding:10px;margin-bottom:10px;}"
+echo ".err{color:#ff4800;background-color:#ffefe6;border:1px solid #ffab7d;-webkit-border-radius:3px;-moz-border-radius:3px;border-radius:3px;padding:10px;margin-bottom:10px;}"
+echo "</style>"
+### CSS END ###
+# echo "<script type=\"text/javascript\">"
+# echo "setTimeout(function(){document.getElementById('msg').style.display=\"none\";},5000);"
+# echo "</script>"
+# echo "<script type=\"text/javascript\">"
+# echo "setTimeout(function(){document.getElementById('err').style.display=\"none\";},5000);"
+# echo "</script>"
+echo "</head>"
+echo "<body>"
+echo "<div class=\"menu\"><span class=\"title1\">OpenWrt</span></div>"
+echo "<div class=\"main\">"
+echo ""
+[ -z $MSG ] || echo "<div id=\"msg\" class=\"msg\">$MSG</div>"
+[ -z $ERR ] || echo "<div id=\"err\" class=\"err\">$ERR</div>"
+echo "<h1>$TITLE</h1>"
+[ ${#is_process} != 0 ] && echo "$APP is running" || echo "$APP is not running"
+echo "<form action=\"$SCRIPT_NAME\" method=\"POST\">"
+echo "<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\">"
+echo "<tr><td class=\"td_l\"></td><td></td></tr>"
+echo "<tr><td>Server</td><td><input name=\"server_ip\" type=\"text\" value=\"$(echo -n $server_ip)\" /></td></tr>"
+echo "<tr><td>Port</td><td><input name=\"server_port\" type=\"text\" value=\"$(echo -n $server_port)\" /></td></tr>"
+echo "<tr><td>Password</td><td><input name=\"server_password\" type=\"text\" value=\"$(echo -n $server_password)\" /></td></tr>"
+echo "<tr><td>Method</td><td><select name=\"server_method\"><option value="table" $([ "$server_method" = "table" ] && echo "selected")>table</option><option value="rc4" $([ "$server_method" = "rc4" ] && echo "selected")>rc4</option><option value="aes-128-cfb" $([ "$server_method" = "aes-128-cfb" ] && echo "selected")>aes-128-cfb</option><option value="aes-192-cfb" $([ "$server_method" = "aes-192-cfb" ] && echo "selected")>aes-192-cfb</option><option value="aes-256-cfb" $([ "$server_method" = "aes-256-cfb" ] && echo "selected")>aes-256-cfb</option><option value="bf-cfb" $([ "$server_method" = "bf-cfb" ] && echo "selected")>bf-cfb</option><option value="cast5-cfb" $([ "$server_method" = "cast5-cfb" ] && echo "selected")>cast5-cfb</option><option value="des-cfb" $([ "$server_method" = "des-cfb" ] && echo "selected")>des-cfb</option><option value="camellia-128-cfb" $([ "$server_method" = "camellia-128-cfb" ] && echo "selected")>camellia-128-cfb</option><option value="camellia-192-cfb" $([ "$server_method" = "camellia-192-cfb" ] && echo "selected")>camellia-192-cfb</option><option value="camellia-256-cfb" $([ "$server_method" = "camellia-256-cfb" ] && echo "selected")>camellia-256-cfb</option><option value="idea-cfb" $([ "$server_method" = "idea-cfb" ] && echo "selected")>idea-cfb</option><option value="rc2-cfb" $([ "$server_method" = "rc2-cfb" ] && echo "selected")>rc2-cfb</option><option value="seed-cfb" $([ "$server_method" = "seed-cfb" ] && echo "selected")>seed-cfb</option></select></td></tr>"
+echo "<tr><td colspan=\"2\"><input name=\"post_action\" type=\"submit\" class=\"submit\" value=\"$post_action\" /></td></tr>"
+echo "</table>"
+echo "</form>"
+
+echo "<ul>"
+### Show Server ###
+# server_now=`grep -o "remote_server.*" $SHADOWSOCKS_CONF | sed "s/.*['\"]\(.*\)['\"]/\1/g"`
+# echo $(ls -t $SHADOWSOCKS_PATH) | awk -v now=$server_now '{for(i=1;i<=NF;i++){
+# 	if ($i==now){
+# 		print "<li><span>"$i"</span> <span class=\"server_now\">now</span><a class=\"blue\" href=\"?action=apply&file="$i"\">Apply</a><a href=\"?action=remove&file="$i"\">Remove</a><a href=\"?action=edit&file="$i"\">Edit</a></li>"
+# 	}else{
+# 	print "<li><span>"$i"</span><a class=\"blue\" href=\"?action=apply&file="$i"\">Apply</a><a href=\"?action=remove&file="$i"\">Remove</a><a href=\"?action=edit&file="$i"\">Edit</a></li>"
+# 	}
+# }}'
+server_now=`grep -o "remote_server.*" $SHADOWSOCKS_CONF | sed "s/.*['\"]\(.*\)['\"]/\1/g"`
+ls -t $SHADOWSOCKS_PATH | \
+while read line
+do
+	if [ "$line" = "$server_now" ]; 
+		then 
+		cat $SHADOWSOCKS_PATH$line | awk -F'|' '{print "<li><span>"$1"</span><span class=\"location\">"$5"</span><span class=\"server_now\">now</span><a class=\"blue\" href=\"?action=apply&file="$1"\">Apply</a><a href=\"?action=remove&file="$1"\">Remove</a><a href=\"?action=edit&file="$1"\">Edit</a></li>"}'
+	else {
+		cat $SHADOWSOCKS_PATH$line | awk -F'|' '{print "<li><span>"$1"</span><span class=\"location\">"$5"</span><a class=\"blue\" href=\"?action=apply&file="$1"\">Apply</a><a href=\"?action=remove&file="$1"\">Remove</a><a href=\"?action=edit&file="$1"\">Edit</a></li>"}'
+	}
+	fi
+# 	[ "$line"="$server_now" ] && {
+# 	cat $SHADOWSOCKS_PATH$line | awk -F'|' '{print "<li><span>"$1" - "$5"</span> <span class=\"server_now\">now</span><a class=\"blue\" href=\"?action=apply&file="$1"\">Apply</a><a href=\"?action=remove&file="$1"\">Remove</a><a href=\"?action=edit&file="$1"\">Edit</a></li>"}'
+# }
+	#eval $(cat $SHADOWSOCKS_PATH$line | awk -F'|' '{print "server_ip="$1,"server_location="$5}')
+	#echo "$server_ip$server_location"
+done
+echo "</ul>"
+
+echo "</div>"
+echo "</body></html>"
+
+### Get IP Location ###
+# curl -A 'Mozilla' -s 'http://www.ip.cn/index.php?ip='$server_now | grep "GeoIP" | sed "s/\(\w\|\"\|[ ]\)\+//g"
+# curl -A 'Mozilla' -s 'http://www.ip.cn/index.php?ip='$server_ip | grep "GeoIP" | sed "s/.*GeoIP: \([^<]\+,\)\+\([^<]\+\)\+.*/\2/ig"
+
+### Get IP Location ###
+# curl -A 'Mozilla' -s 'http://www.geoiptool.com/en/?IP='$server_ip | awk -F '(</?[^>]+>)+' '/Host Name/,/Postal code/ {if (/:/) {printf("%13s ", $2); getline; print $2}} END {print}'
+
+# count="`echo "$QUERY_STRING"|awk -F'[=&]' '{print NF}'`"
+# echo $count
+# a=1
+# eval var_$a=444
+# echo $var_1

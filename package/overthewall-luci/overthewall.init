@@ -1,0 +1,121 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+STOP=90
+APP='overthewall'
+file_gfwlist='/etc/dnsmasq.d/gfwlist.conf'
+file_gfwlist_user='/etc/dnsmasq.d/gfw_user.conf'
+file_ip_gfw='/etc/ipset/gfw'
+file_ip_cdn='/etc/ipset/cdn'
+file_ip_spurious='/etc/ipset/spurious'
+#file_ip_spurious='/etc/firewall.overthewall'
+restart_dnsmasq='0'
+
+update() {
+	config_get update_url config update_url
+	config_get gfwlist_dns_enabled config gfwlist_dns_enabled
+	config_get gfwlist_dns_address config gfwlist_dns_address
+	config_get gfwlist_dns_port config gfwlist_dns_port
+	config_get gfwlist_ipset_enabled config gfwlist_ipset_enabled
+	config_get gfwlist_ipset_name config gfwlist_ipset_name
+	config_get gfwlist_enabled config gfwlist_enabled
+	config_get gfwlist_url config gfwlist_url
+	config_get gfwlist_user_enabled config gfwlist_user_enabled
+	config_get gfwlist_user_url config gfwlist_user_url
+	config_get ip_gfw_enabled config ip_gfw_enabled
+	config_get ip_gfw_url config ip_gfw_url
+	config_get ip_cdn_enabled config ip_cdn_enabled
+	config_get ip_cdn_url config ip_cdn_url
+	config_get ip_spurious_enabled config ip_spurious_enabled
+	config_get ip_spurious_url config ip_spurious_url
+
+	[ -z "$update_url" ] && {
+		echo "missing parameters. check config"
+		return 1
+	}
+
+	[ -n "$gfwlist_dns_port" ] && {
+		gfwlist_dns_port="&dnsport=$gfwlist_dns_port"
+	}
+
+	[ "$gfwlist_enabled" = '1' ] && [ -n "$gfwlist_url" ] && {
+		echo "Updating GFW list..."
+		rm -f "$file_gfwlist"
+		if  [ -n "$gfwlist_dns_address" ] && [ -n "$gfwlist_ipset_name" ]; then
+			curl --silent --data "file=$gfwlist_url&dnsserver=$gfwlist_dns_address$gfwlist_dns_port&ipset=$gfwlist_ipset_name&max=5" "$update_url" >"$file_gfwlist"
+		elif [ -n "$gfwlist_dns_address" ]; then
+			curl --silent --data "file=$gfwlist_url&dnsserver=$gfwlist_dns_address$gfwlist_dns_port&max=5" "$update_url" >"$file_gfwlist"
+		elif [ -n "$gfwlist_ipset_name" ]; then
+			curl --silent --data "file=$gfwlist_url&ipset=$gfwlist_ipset_name&max=5" "$update_url" >"$file_gfwlist"
+		fi
+		restart_dnsmasq='1'
+	}
+
+	[ "$gfwlist_user_enabled" = '1' ] && [ -n "$gfwlist_user_url" ] && {
+		echo "Updating GFW user list..."
+		rm -f "$file_gfwlist_user"
+		if  [ -n "$gfwlist_dns_address" ] && [ -n "$gfwlist_ipset_name" ]; then
+			curl --silent --data "file=$gfwlist_user_url&dnsserver=$gfwlist_dns_address$gfwlist_dns_port&ipset=$gfwlist_ipset_name&max=5" "$update_url" >"$file_gfwlist_user"
+		elif [ -n "$gfwlist_dns_address" ]; then
+			curl --silent --data "file=$gfwlist_user_url&dnsserver=$gfwlist_dns_address$gfwlist_dns_port&max=5" "$update_url" >"$file_gfwlist_user"
+		elif [ -n "$gfwlist_ipset_name" ]; then
+			curl --silent --data "file=$gfwlist_user_url&ipset=$gfwlist_ipset_name&max=5" "$update_url" >"$file_gfwlist_user"
+		fi
+		restart_dnsmasq='1'
+	}
+
+	[ "$ip_gfw_enabled" = '1' ] && [ -n "$ip_gfw_url" ] && {
+		echo "Updating GFW ip list..."
+		rm -f "$file_ip_gfw"
+		curl --silent --data "file=$ip_gfw_url" "$update_url" >"$file_ip_gfw"
+	}
+
+	[ "$ip_cdn_enabled" = '1' ] && [ -n "$ip_cdn_url" ] && {
+		echo "Updating CDN ip list..."
+		rm -f "$file_ip_cdn"
+		curl --silent --data "file=$ip_cdn_url" "$update_url" >"$file_ip_cdn"
+	}
+
+	[ "$ip_spurious_enabled" = '1' ] && [ -n "$ip_spurious_url" ] && {
+		echo "Updating Spurious ip list..."
+		rm -f "$file_ip_spurious"
+		curl --silent --data "file=$ip_spurious_url" "$update_url" >"$file_ip_spurious"
+		#curl --silent --data "file=$ip_spurious_url&spuriousip=true" "$update_url" >"$file_ip_spurious"
+		# curl --silent --data "file=$ip_spurious_url&spuriousip=hex" "$update_url" >"$file_ip_spurious"
+		# echo "iptables -t mangle -I PREROUTING -p udp --sport 53 -m u32 --u32 \"0&0x0F000000=0x05000000 && 0>>22&0x3C@8&0x810F=0x8000 && 0>>22&0x3C@12&0xFFFF=0x0000\" -j DROP" >>"$file_ip_spurious"
+		# /etc/init.d/firewall restart
+	}
+
+	echo "# Finished updating"
+	[ "$restart_dnsmasq" = '1' ] && {
+		echo "dnsmasq> Restarting" 
+		/etc/init.d/dnsmasq restart
+		echo "dnsmasq> Restarted"
+	}
+	exit
+}
+
+reset() {
+	rm -f "$file_gfwlist"
+	rm -f "$file_gfwlist_user"
+	rm -f "$file_ip_gfw"
+	rm -f "$file_ip_cdn"
+	/etc/init.d/dnsmasq restart
+	[ -e "$file_ip_spurious" ] && rm -f "$file_ip_spurious" && /etc/init.d/firewall restart
+}
+
+start() {
+	config_load "$APP"
+
+	local autoupdate_enabled update_url gfwlist_dns_enabled gfwlist_dns_address gfwlist_dns_port gfwlist_ipset_enabled gfwlist_ipset_name gfwlist_enabled gfwlist_url gfwlist_user_enabled gfwlist_user_url ip_gfw_enabled ip_gfw_url ip_cdn_enabled ip_cdn_url ip_spurious_enabled ip_spurious_url
+
+	config_get autoupdate_enabled config autoupdate_enabled 0
+
+	[ "$1" = "update" ] && update
+	[ "$1" = "reset" ] && reset
+	[ "$autoupdate_enabled" = "1" ] && [ ! -e "/etc/hotplug.d/iface/90-overthewall" ] && echo "[ \"\$ACTION\" = \"ifup\" ] && /etc/init.d/gfw start update" >/etc/hotplug.d/iface/90-overthewall
+}
+
+stop() {
+	rm /etc/hotplug.d/iface/90-overthewall
+}

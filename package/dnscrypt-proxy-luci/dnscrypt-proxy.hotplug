@@ -1,0 +1,8 @@
+#!/bin/sh
+
+[ "$ACTION" = ifup ] || exit 0
+
+config_load 'dnscrypt-proxy'
+config_get enabled config enabled
+
+[ "$enabled" = '1' ] && [ ! -n "$( pgrep dnscrypt-proxy )" ] && /etc/init.d/dnscrypt-proxy restart
